@@ -1,0 +1,43 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - feature/**
+      - dev
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Image Tag
+        id: vars
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
+            echo "TAG=dev-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "TAG=prod-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=feature-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Image
+        run: |
+          docker build -t ghcr.io/kulkarni-abhi/${{ github.event.repository.name }}:${{ steps.vars.outputs.TAG }} .
+
+      - name: Push Image
+        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
+        run: |
+          docker push ghcr.io/kulkarni-abhi/${{ github.event.repository.name }}:${{ steps.vars.outputs.TAG }}
