@@ -3,16 +3,16 @@ name: CI Pipeline
 on:
   push:
     branches:
-      - feature/**
       - dev
       - main
+  workflow_dispatch:   # Manual trigger for feature branches
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -22,10 +22,11 @@ jobs:
       - name: Set Image Tag
         id: vars
         run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
+          BRANCH=${GITHUB_REF##*/}
+          if [[ "$BRANCH" == "dev" ]]; then
             echo "TAG=dev-${GITHUB_SHA}" >> $GITHUB_OUTPUT
-          elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            echo "TAG=prod-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == "main" ]]; then
+            echo "TAG=release-${GITHUB_SHA}" >> $GITHUB_OUTPUT
           else
             echo "TAG=feature-${GITHUB_SHA}" >> $GITHUB_OUTPUT
           fi
@@ -38,6 +39,5 @@ jobs:
           docker build -t ghcr.io/kulkarni-abhi/${{ github.event.repository.name }}:${{ steps.vars.outputs.TAG }} .
 
       - name: Push Image
-        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
         run: |
           docker push ghcr.io/kulkarni-abhi/${{ github.event.repository.name }}:${{ steps.vars.outputs.TAG }}
