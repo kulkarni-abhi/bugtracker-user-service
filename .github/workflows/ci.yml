@@ -5,7 +5,10 @@ on:
     branches:
       - dev
       - main
-  workflow_dispatch:   # Manual trigger for feature branches
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io/kulkarni-abhi
 
 jobs:
   build:
@@ -16,28 +19,64 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout Service Repo
         uses: actions/checkout@v4
 
-      - name: Set Image Tag
+      - name: Set Variables
         id: vars
         run: |
           BRANCH=${GITHUB_REF##*/}
+          SERVICE=${{ github.event.repository.name }}
+
           if [[ "$BRANCH" == "dev" ]]; then
-            echo "TAG=dev-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+            TAG="dev-${GITHUB_SHA}"
           elif [[ "$BRANCH" == "main" ]]; then
-            echo "TAG=release-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+            TAG="release-${GITHUB_SHA}"
           else
-            echo "TAG=feature-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+            TAG="feature-${GITHUB_SHA}"
           fi
+
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "BRANCH_NAME=$BRANCH" >> $GITHUB_OUTPUT
+          echo "SERVICE_NAME=$SERVICE" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Build Image
         run: |
-          docker build -t ghcr.io/kulkarni-abhi/${{ github.event.repository.name }}:${{ steps.vars.outputs.TAG }} .
+          docker build -t $REGISTRY/${{ steps.vars.outputs.SERVICE_NAME }}:${{ steps.vars.outputs.TAG }} .
 
       - name: Push Image
         run: |
-          docker push ghcr.io/kulkarni-abhi/${{ github.event.repository.name }}:${{ steps.vars.outputs.TAG }}
+          docker push $REGISTRY/${{ steps.vars.outputs.SERVICE_NAME }}:${{ steps.vars.outputs.TAG }}
+
+      # --------------------------------------------------
+      # Update GitOps (ONLY for dev and main)
+      # --------------------------------------------------
+      - name: Update GitOps Repo
+        if: steps.vars.outputs.BRANCH_NAME == 'dev' || steps.vars.outputs.BRANCH_NAME == 'main'
+        run: |
+          git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/kulkarni-abhi/bugtracker-gitops.git
+          cd bugtracker-gitops
+
+          SERVICE=${{ steps.vars.outputs.SERVICE_NAME }}
+          IMAGE_TAG=${{ steps.vars.outputs.TAG }}
+          BRANCH=${{ steps.vars.outputs.BRANCH_NAME }}
+
+          if [[ "$BRANCH" == "dev" ]]; then
+            sed -i "s/tag:.*/tag: \"${IMAGE_TAG}\"/" environments/dev/${SERVICE}-values.yaml
+            sed -i "s/tag:.*/tag: \"${IMAGE_TAG}\"/" environments/qe/${SERVICE}-values.yaml
+          fi
+
+          if [[ "$BRANCH" == "main" ]]; then
+            sed -i "s/tag:.*/tag: \"${IMAGE_TAG}\"/" environments/staging/${SERVICE}-values.yaml
+            sed -i "s/tag:.*/tag: \"${IMAGE_TAG}\"/" environments/prod/${SERVICE}-values.yaml
+          fi
+
+          git config user.name "ci-bot"
+          git config user.email "ci@bot.com"
+
+          git add .
+          git commit -m "Deploy ${SERVICE}:${IMAGE_TAG}"
+          git push origin main
