@@ -19,14 +19,23 @@ jobs:
       packages: write
 
     steps:
+      # -------------------------------
+      # Checkout Service Repo
+      # -------------------------------
       - name: Checkout Service Repo
         uses: actions/checkout@v4
 
+      # -------------------------------
+      # Set Variables
+      # -------------------------------
       - name: Set Variables
         id: vars
         run: |
           BRANCH=${GITHUB_REF##*/}
-          SERVICE=${{ github.event.repository.name }}
+          FULL_SERVICE=${{ github.event.repository.name }}
+
+          # Remove bugtracker- prefix
+          SERVICE=${FULL_SERVICE#bugtracker-}
 
           if [[ "$BRANCH" == "dev" ]]; then
             TAG="dev-${GITHUB_SHA}"
@@ -36,27 +45,40 @@ jobs:
             TAG="feature-${GITHUB_SHA}"
           fi
 
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
           echo "BRANCH_NAME=$BRANCH" >> $GITHUB_OUTPUT
           echo "SERVICE_NAME=$SERVICE" >> $GITHUB_OUTPUT
+          echo "FULL_SERVICE_NAME=$FULL_SERVICE" >> $GITHUB_OUTPUT
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
+      # -------------------------------
+      # Login to GHCR
+      # -------------------------------
       - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+      # -------------------------------
+      # Build Image
+      # -------------------------------
       - name: Build Image
         run: |
-          docker build -t $REGISTRY/${{ steps.vars.outputs.SERVICE_NAME }}:${{ steps.vars.outputs.TAG }} .
+          docker build -t $REGISTRY/${{ steps.vars.outputs.FULL_SERVICE_NAME }}:${{ steps.vars.outputs.TAG }} .
 
+      # -------------------------------
+      # Push Image
+      # -------------------------------
       - name: Push Image
         run: |
-          docker push $REGISTRY/${{ steps.vars.outputs.SERVICE_NAME }}:${{ steps.vars.outputs.TAG }}
+          docker push $REGISTRY/${{ steps.vars.outputs.FULL_SERVICE_NAME }}:${{ steps.vars.outputs.TAG }}
 
       # --------------------------------------------------
-      # Update GitOps (ONLY for dev and main)
+      # Update GitOps Repo (Only dev & main)
       # --------------------------------------------------
       - name: Update GitOps Repo
         if: steps.vars.outputs.BRANCH_NAME == 'dev' || steps.vars.outputs.BRANCH_NAME == 'main'
         run: |
+          echo "Cloning GitOps repository..."
+
           git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/kulkarni-abhi/bugtracker-gitops.git
           cd bugtracker-gitops
 
@@ -64,6 +86,11 @@ jobs:
           IMAGE_TAG=${{ steps.vars.outputs.TAG }}
           BRANCH=${{ steps.vars.outputs.BRANCH_NAME }}
 
+          echo "Updating service: $SERVICE"
+          echo "Image tag: $IMAGE_TAG"
+          echo "Branch: $BRANCH"
+
+          # Update correct environments
           if [[ "$BRANCH" == "dev" ]]; then
             sed -i "s/tag:.*/tag: \"${IMAGE_TAG}\"/" environments/dev/${SERVICE}-values.yaml
             sed -i "s/tag:.*/tag: \"${IMAGE_TAG}\"/" environments/qe/${SERVICE}-values.yaml
@@ -78,5 +105,8 @@ jobs:
           git config user.email "ci@bot.com"
 
           git add .
-          git commit -m "Deploy ${SERVICE}:${IMAGE_TAG}"
+          git commit -m "Deploy ${SERVICE}:${IMAGE_TAG}" || echo "No changes to commit"
+
           git push origin main
+
+          echo "GitOps update complete."
