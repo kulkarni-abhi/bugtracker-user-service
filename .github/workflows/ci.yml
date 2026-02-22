@@ -40,7 +40,7 @@ jobs:
           if [[ "$BRANCH" == "dev" ]]; then
             TAG="dev-${GITHUB_SHA}"
           elif [[ "$BRANCH" == "main" ]]; then
-            TAG="release-${GITHUB_SHA}"
+            TAG="main-${GITHUB_SHA}"
           else
             TAG="feature-${GITHUB_SHA}"
           fi
