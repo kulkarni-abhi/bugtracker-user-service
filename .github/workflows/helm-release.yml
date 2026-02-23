@@ -1,0 +1,67 @@
+name: Helm Release
+
+on:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io/kulkarni-abhi
+  HELM_REPO: helm
+
+jobs:
+  publish-helm:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+
+      # ----------------------------------------
+      # Checkout Repository
+      # ----------------------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------
+      # Install Helm
+      # ----------------------------------------
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      # ----------------------------------------
+      # Extract Chart Metadata
+      # ----------------------------------------
+      - name: Read Chart.yaml
+        id: chart
+        run: |
+          CHART_NAME=$(grep '^name:' helm/Chart.yaml | awk '{print $2}')
+          CHART_VERSION=$(grep '^version:' helm/Chart.yaml | awk '{print $2}')
+
+          echo "CHART_NAME=$CHART_NAME" >> $GITHUB_OUTPUT
+          echo "CHART_VERSION=$CHART_VERSION" >> $GITHUB_OUTPUT
+
+          echo "Chart Name: $CHART_NAME"
+          echo "Chart Version: $CHART_VERSION"
+
+      # ----------------------------------------
+      # Login to GHCR (Helm OCI)
+      # ----------------------------------------
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      # ----------------------------------------
+      # Package Helm Chart
+      # ----------------------------------------
+      - name: Package Helm Chart
+        run: |
+          helm package helm
+
+      # ----------------------------------------
+      # Push Helm Chart to GHCR
+      # ----------------------------------------
+      - name: Push Helm Chart
+        run: |
+          CHART_FILE=$(ls *.tgz)
+          helm push $CHART_FILE oci://${{ env.REGISTRY }}/${{ env.HELM_REPO }}
